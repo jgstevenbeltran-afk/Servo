@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Servo Control</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: sans-serif; background: #0f1117; color: #fff; padding: 16px; min-height: 100vh; }
+  h1 { font-size: 20px; font-weight: 500; text-align: center; margin-bottom: 4px; color: #fff; }
+  .subtitle { font-size: 13px; color: #888; text-align: center; margin-bottom: 20px; }
+
+  .status-bar { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 20px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #444; transition: background 0.3s; }
+  .dot.connected { background: #1D9E75; }
+  .status-text { font-size: 13px; color: #888; }
+
+  .btn-connect { display: block; width: 100%; padding: 14px; border-radius: 12px; border: none; background: #185FA5; color: #fff; font-size: 15px; font-weight: 500; cursor: pointer; margin-bottom: 20px; transition: background 0.2s; }
+  .btn-connect:active { background: #0C447C; }
+  .btn-connect.connected { background: #A32D2D; }
+
+  .card { background: #1a1d27; border-radius: 14px; padding: 16px; margin-bottom: 16px; border: 0.5px solid #2a2d3a; }
+  .card-title { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
+
+  .modos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .btn-modo { padding: 16px 8px; border-radius: 12px; border: none; font-size: 14px; font-weight: 500; cursor: pointer; transition: transform 0.1s, opacity 0.2s; }
+  .btn-modo:active { transform: scale(0.96); }
+  .btn-modo.disabled { opacity: 0.4; pointer-events: none; }
+  .btn-auto   { background: #1D9E75; color: #04342C; }
+  .btn-manual { background: #185FA5; color: #E6F1FB; }
+  .btn-sensor { background: #534AB7; color: #EEEDFE; }
+  .btn-parar  { background: #A32D2D; color: #FCEBEB; }
+
+  .angulos { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px; }
+  .btn-ang { padding: 12px 4px; border-radius: 10px; border: 0.5px solid #2a2d3a; background: #252836; color: #aaa; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.15s, color 0.15s; }
+  .btn-ang:active { background: #185FA5; color: #fff; }
+
+  .servo-visual { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 0; }
+  .servo-arc { position: relative; width: 200px; height: 110px; }
+  .servo-arc svg { width: 100%; height: 100%; }
+  .servo-angle-label { font-size: 28px; font-weight: 500; color: #fff; }
+  .servo-angle-sub { font-size: 12px; color: #666; }
+
+  .gyro-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .gyro-val { background: #252836; border-radius: 10px; padding: 10px 8px; text-align: center; }
+  .gyro-val .axis { font-size: 11px; color: #666; margin-bottom: 4px; }
+  .gyro-val .val  { font-size: 18px; font-weight: 500; color: #fff; }
+  .gyro-val .unit { font-size: 10px; color: #555; }
+
+  .chart-wrap { position: relative; height: 120px; background: #13151f; border-radius: 10px; overflow: hidden; }
+  canvas { width: 100% !important; height: 120px !important; }
+
+  .log { background: #13151f; border-radius: 10px; padding: 10px; height: 100px; overflow-y: auto; font-size: 12px; font-family: monospace; color: #5DCAA5; margin-top: 8px; }
+  .log .err { color: #F09595; }
+</style>
+</head>
+<body>
+
+<h1>Servo Control</h1>
+<p class="subtitle">ESP32 + GY-521</p>
+
+<div class="status-bar">
+  <div class="dot" id="dot"></div>
+  <span class="status-text" id="status-text">Desconectado</span>
+</div>
+
+<button class="btn-connect" id="btn-connect" onclick="toggleConnect()">Conectar a ESP32</button>
+
+<div class="card">
+  <div class="card-title">Modos</div>
+  <div class="modos">
+    <button class="btn-modo btn-auto disabled"   id="b1" onclick="enviar('1')">Auto timer</button>
+    <button class="btn-modo btn-manual disabled" id="b2" onclick="enviar('2')">Manual</button>
+    <button class="btn-modo btn-sensor disabled" id="b3" onclick="enviar('3')">Sensor GY-521</button>
+    <button class="btn-modo btn-parar disabled"  id="b4" onclick="enviar('0')">Parar</button>
+  </div>
+  <div class="angulos">
+    <button class="btn-ang disabled" id="ba0"   onclick="enviar('a0')">0°</button>
+    <button class="btn-ang disabled" id="ba45"  onclick="enviar('a45')">45°</button>
+    <button class="btn-ang disabled" id="ba90"  onclick="enviar('a90')">90°</button>
+    <button class="btn-ang disabled" id="ba135" onclick="enviar('a135')">135°</button>
+    <button class="btn-ang disabled" id="ba180" onclick="enviar('a180')">180°</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Posición del servo</div>
+  <div class="servo-visual">
+    <div class="servo-arc">
+      <svg viewBox="0 0 200 110" xmlns="http://www.w3.org/2000/svg">
+        <path d="M 10 100 A 90 90 0 0 1 190 100" fill="none" stroke="#2a2d3a" stroke-width="8" stroke-linecap="round"/>
+        <path id="arc-fill" d="M 10 100 A 90 90 0 0 1 190 100" fill="none" stroke="#185FA5" stroke-width="8" stroke-linecap="round" stroke-dasharray="283" stroke-dashoffset="283"/>
+        <line id="needle" x1="100" y1="100" x2="100" y2="18" stroke="#fff" stroke-width="3" stroke-linecap="round" transform="rotate(0, 100, 100)"/>
+        <circle cx="100" cy="100" r="6" fill="#185FA5"/>
+        <text x="6"   y="108" fill="#555" font-size="11" font-family="sans-serif">0°</text>
+        <text x="168" y="108" fill="#555" font-size="11" font-family="sans-serif">180°</text>
+      </svg>
+    </div>
+    <div class="servo-angle-label" id="angulo-label">0°</div>
+    <div class="servo-angle-sub">ángulo actual</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Acelerómetro (g)</div>
+  <div class="gyro-grid">
+    <div class="gyro-val"><div class="axis">X</div><div class="val" id="ax">0.00</div><div class="unit">g</div></div>
+    <div class="gyro-val"><div class="axis">Y</div><div class="val" id="ay">0.00</div><div class="unit">g</div></div>
+    <div class="gyro-val"><div class="axis">Z</div><div class="val" id="az">0.00</div><div class="unit">g</div></div>
+  </div>
+  <div class="card-title">Giroscopio (°/s)</div>
+  <div class="gyro-grid">
+    <div class="gyro-val"><div class="axis">X</div><div class="val" id="gx">0.0</div><div class="unit">°/s</div></div>
+    <div class="gyro-val"><div class="axis">Y</div><div class="val" id="gy">0.0</div><div class="unit">°/s</div></div>
+    <div class="gyro-val"><div class="axis">Z</div><div class="val" id="gz">0.0</div><div class="unit">°/s</div></div>
+  </div>
+  <div class="chart-wrap" style="margin-top:12px;">
+    <canvas id="chart"></canvas>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Consola</div>
+  <div class="log" id="log"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+const UART_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const UART_TX      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+const UART_RX      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+
+let device, server, rxChar, txChar, connected = false;
+let anguloActual = 0;
+let bufferBLE = "";
+
+const MAX_PUNTOS = 40;
+const dataAx = [], dataAy = [], dataAz = [];
+for(let i=0;i<MAX_PUNTOS;i++){ dataAx.push(0); dataAy.push(0); dataAz.push(0); }
+
+const ctx = document.getElementById('chart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: Array(MAX_PUNTOS).fill(''),
+    datasets: [
+      { label:'Ax', data: dataAx, borderColor:'#378ADD', borderWidth:1.5, pointRadius:0, tension:0.3 },
+      { label:'Ay', data: dataAy, borderColor:'#1D9E75', borderWidth:1.5, pointRadius:0, tension:0.3 },
+      { label:'Az', data: dataAz, borderColor:'#EF9F27', borderWidth:1.5, pointRadius:0, tension:0.3 },
+    ]
+  },
+  options: {
+    animation: false,
+    scales: {
+      x: { display: false },
+      y: { display: false, min: -2, max: 2 }
+    },
+    plugins: { legend: { display: false } },
+    responsive: true,
+    maintainAspectRatio: false
+  }
+});
+
+function log(msg, err=false) {
+  const d = document.getElementById('log');
+  const p = document.createElement('div');
+  p.textContent = msg;
+  if(err) p.className = 'err';
+  d.appendChild(p);
+  d.scrollTop = d.scrollHeight;
+}
+
+function setConectado(val) {
+  connected = val;
+  document.getElementById('dot').className = 'dot' + (val ? ' connected' : '');
+  document.getElementById('status-text').textContent = val ? 'Conectado' : 'Desconectado';
+  document.getElementById('btn-connect').textContent = val ? 'Desconectar' : 'Conectar a ESP32';
+  document.getElementById('btn-connect').className = 'btn-connect' + (val ? ' connected' : '');
+  ['b1','b2','b3','b4','ba0','ba45','ba90','ba135','ba180'].forEach(id => {
+    const el = document.getElementById(id);
+    if(val) el.classList.remove('disabled');
+    else el.classList.add('disabled');
+  });
+}
+
+async function toggleConnect() {
+  if(connected) {
+    if(device && device.gatt.connected) device.gatt.disconnect();
+    setConectado(false);
+    log('Desconectado.');
+    return;
+  }
+  try {
+    log('Buscando ESP32...');
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ name: 'ESP32' }],
+      optionalServices: [UART_SERVICE]
+    });
+    device.addEventListener('gattserverdisconnected', () => {
+      setConectado(false);
+      log('Conexión perdida.', true);
+    });
+    server  = await device.gatt.connect();
+    const svc = await server.getPrimaryService(UART_SERVICE);
+    rxChar  = await svc.getCharacteristic(UART_RX);
+    txChar  = await svc.getCharacteristic(UART_TX);
+    await txChar.startNotifications();
+    txChar.addEventListener('characteristicvaluechanged', onDato);
+    setConectado(true);
+    log('Conectado a ' + device.name);
+  } catch(e) {
+    log('Error: ' + e.message, true);
+  }
+}
+
+function onDato(e) {
+  const txt = new TextDecoder().decode(e.target.value);
+  bufferBLE += txt;
+  let lineas = bufferBLE.split('\n');
+  bufferBLE = lineas.pop();
+  lineas.forEach(linea => {
+    linea = linea.trim();
+    if(!linea) return;
+    log('< ' + linea);
+    parsearDato(linea);
+  });
+}
+
+function parsearDato(linea) {
+  // Formato: Acel X:0.02 Y:-0.01 Z:1.00 g
+  if(linea.startsWith('Acel')) {
+    const m = linea.match(/X:([-\d.]+)\s+Y:([-\d.]+)\s+Z:([-\d.]+)/);
+    if(m) {
+      const ax = parseFloat(m[1]), ay = parseFloat(m[2]), az = parseFloat(m[3]);
+      document.getElementById('ax').textContent = ax.toFixed(2);
+      document.getElementById('ay').textContent = ay.toFixed(2);
+      document.getElementById('az').textContent = az.toFixed(2);
+      dataAx.shift(); dataAx.push(ax);
+      dataAy.shift(); dataAy.push(ay);
+      dataAz.shift(); dataAz.push(az);
+      chart.update();
+    }
+  }
+  // Formato: Giro X:0.5 Y:-0.3 Z:0.1 /s
+  if(linea.startsWith('Giro')) {
+    const m = linea.match(/X:([-\d.]+)\s+Y:([-\d.]+)\s+Z:([-\d.]+)/);
+    if(m) {
+      document.getElementById('gx').textContent = parseFloat(m[1]).toFixed(1);
+      document.getElementById('gy').textContent = parseFloat(m[2]).toFixed(1);
+      document.getElementById('gz').textContent = parseFloat(m[3]).toFixed(1);
+    }
+  }
+  // Formato: Servo -> 90 grados
+  if(linea.startsWith('Servo')) {
+    const m = linea.match(/(\d+)\s+grados/);
+    if(m) actualizarServo(parseInt(m[1]));
+  }
+  // Formato: Paso X/5 -> 90 grados
+  if(linea.startsWith('Paso')) {
+    const m = linea.match(/(\d+)\s+grados/);
+    if(m) actualizarServo(parseInt(m[1]));
+  }
+}
+
+function actualizarServo(ang) {
+  anguloActual = ang;
+  document.getElementById('angulo-label').textContent = ang + '°';
+  const grados = -90 + ang;
+  document.getElementById('needle').setAttribute('transform', `rotate(${grados}, 100, 100)`);
+  const total = 283;
+  const offset = total - (ang / 180) * total;
+  document.getElementById('arc-fill').setAttribute('stroke-dashoffset', offset.toFixed(1));
+}
+
+async function enviar(cmd) {
+  if(!connected || !rxChar) { log('No conectado', true); return; }
+  try {
+    const datos = new TextEncoder().encode(cmd + '\n');
+    await rxChar.writeValue(datos);
+    log('> ' + cmd);
+    if(cmd.startsWith('a')) {
+      const ang = parseInt(cmd.slice(1));
+      if(!isNaN(ang)) actualizarServo(ang);
+    }
+  } catch(e) {
+    log('Error enviando: ' + e.message, true);
+  }
+}
+</script>
+</body>
+</html>
